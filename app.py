@@ -46,9 +46,9 @@ def read_pptx(file):
                 text += shape.text + "\n"
     return text
 
-# 計算 embedding
+# 計算 embedding (含限速重試)
 def get_embedding(text):
-    while True:
+    for attempt in range(3):  # 最多重試 3 次
         try:
             response = client.embeddings.create(
                 model="text-embedding-3-small",
@@ -56,14 +56,17 @@ def get_embedding(text):
             )
             return np.array(response.data[0].embedding)
         except RateLimitError:
-            st.warning("⚠️ API 請求太快，被限速了，等一下自動重試...")
+            st.warning(f"⚠️ API 被限速了，正在重試 ({attempt+1}/3)...")
             time.sleep(5)
+    st.error("❌ 這段文字因為 API 限制無法建立 embedding，已跳過。")
+    return None
 
 # 儲存到 SQLite
 def save_chunk(source, content, embedding):
-    c.execute("INSERT INTO chunks (source, content, embedding) VALUES (?, ?, ?)", 
-              (source, content, json.dumps(embedding.tolist())))
-    conn.commit()
+    if embedding is not None:
+        c.execute("INSERT INTO chunks (source, content, embedding) VALUES (?, ?, ?)", 
+                  (source, content, json.dumps(embedding.tolist())))
+        conn.commit()
 
 # 從 SQLite 取所有 chunk
 def load_chunks():
@@ -81,7 +84,7 @@ def cosine_similarity(a, b):
     return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
 
 # Streamlit 介面
-st.title("📚 KMUCer 助教 (SQLite 儲存版)")
+st.title("📚 KMUCer 助教 (SQLite + 大模型並存版)")
 
 menu = st.sidebar.radio("選單", ["💬 助教對話", "🧱 建立知識庫"])
 
@@ -94,7 +97,7 @@ if menu == "🧱 建立知識庫":
                 text = read_pdf(file)
             else:
                 text = read_pptx(file)
-            # 切割文字成 chunk
+            # 切割文字成 chunk (加大減少 API 請求數)
             chunks = [text[i:i+1500] for i in range(0, len(text), 1500)]
             for chunk in chunks:
                 emb = get_embedding(chunk)
@@ -106,32 +109,40 @@ elif menu == "💬 助教對話":
     query = st.text_input("輸入你的問題：")
     if st.button("送出問題") and query:
         chunks = load_chunks()
-        if not chunks:
-            st.warning("⚠️ 尚未建立知識庫，請先上傳教材！")
-        else:
+        context_text = ""
+        if chunks:
             query_emb = get_embedding(query)
-            # 找出最相似的三個 chunk
             sims = [(cosine_similarity(query_emb, emb), source, content) for source, content, emb in chunks]
             sims = sorted(sims, key=lambda x: x[0], reverse=True)[:3]
             context_text = "\n".join([s[2] for s in sims])
+        else:
+            st.info("📂 尚未建立教材知識庫，將僅依靠大模型回答。")
 
-            system_prompt = f"""你是 KMUCer，高雄醫學大學醫藥暨應用化學系的課程助教。
-            你是碩士班學姊，風格「專業 + 親切 + 搞笑」。
-            請基於以下教材內容回答學生問題：
-            {context_text}
-            """
+        system_prompt = f"""你是 KMUCer，高雄醫學大學醫藥暨應用化學系的課程助教。
+        你是碩士班學姊，風格「專業 + 親切 + 搞笑」。
 
-            completion = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": query}
-                ]
-            )
+        你有兩種知識來源：
+        1. 教材知識庫（以下提供的內容） → 優先使用
+        2. 你自己的專業知識（大模型本身） → 在教材沒有涵蓋時補充
 
-            answer = completion.choices[0].message.content
-            st.markdown("### 🗨️ KMUCer 回答")
-            st.write(answer)
+        以下是教材內容（如果空白代表沒有相關教材）：
+        {context_text}
+
+        請結合這些知識，回答學生的問題。
+        """
+
+        completion = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": query}
+            ]
+        )
+
+        answer = completion.choices[0].message.content
+        st.markdown("### 🗨️ KMUCer 回答")
+        st.write(answer)
+
+        if context_text:
             st.markdown("### 📎 參考教材")
-            for s in sims:
-                st.write(f"- 來源: {s[1]} | 內容: {s[2][:100]}...")
+            st.write(context_text)
