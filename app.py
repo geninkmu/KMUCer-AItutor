@@ -15,12 +15,12 @@ if not OPENAI_API_KEY:
 client = OpenAI(api_key=OPENAI_API_KEY)
 
 # 初始化 ChromaDB
-chroma_client = chromadb.PersistentClient(path="index")
+chroma_client = chromadb.Client()
 openai_ef = embedding_functions.OpenAIEmbeddingFunction(
     api_key=OPENAI_API_KEY,
     model_name="text-embedding-3-small"
 )
-collection = chroma_client.get_or_create_collection(
+collection = chroma_client.create_collection(
     name="kmucer",
     embedding_function=openai_ef
 )
