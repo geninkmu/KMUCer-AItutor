@@ -2,9 +2,8 @@ import os
 import streamlit as st
 import pdfplumber
 from pptx import Presentation
-import chromadb
-from chromadb.utils import embedding_functions
 from openai import OpenAI
+import numpy as np
 
 # 初始化 OpenAI API
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -14,16 +13,8 @@ if not OPENAI_API_KEY:
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-# 初始化 ChromaDB
-chroma_client = chromadb.Client()
-openai_ef = embedding_functions.OpenAIEmbeddingFunction(
-    api_key=OPENAI_API_KEY,
-    model_name="text-embedding-3-small"
-)
-collection = chroma_client.create_collection(
-    name="kmucer",
-    embedding_function=openai_ef
-)
+# 全域知識庫 (簡單用 list 存)
+knowledge_chunks = []
 
 # 輔助函數：讀取 PDF
 def read_pdf(file):
@@ -43,8 +34,20 @@ def read_pptx(file):
                 text += shape.text + "\n"
     return text
 
+# 計算 embedding
+def get_embedding(text):
+    response = client.embeddings.create(
+        model="text-embedding-3-small",
+        input=text
+    )
+    return np.array(response.data[0].embedding)
+
+# 相似度計算 (cosine similarity)
+def cosine_similarity(a, b):
+    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+
 # Streamlit 介面
-st.title("📚 KMUCer 助教 (ChromaDB 版)")
+st.title("📚 KMUCer 助教 (純 Python 版)")
 
 menu = st.sidebar.radio("選單", ["💬 助教對話", "🧱 建立知識庫"])
 
@@ -59,38 +62,40 @@ if menu == "🧱 建立知識庫":
                 text = read_pptx(file)
             # 切割文字成 chunk
             chunks = [text[i:i+500] for i in range(0, len(text), 500)]
-            for idx, chunk in enumerate(chunks):
-                collection.add(
-                    documents=[chunk],
-                    metadatas=[{"source": file.name}],
-                    ids=[f"{file.name}_{idx}"]
-                )
+            for chunk in chunks:
+                emb = get_embedding(chunk)
+                knowledge_chunks.append((chunk, emb))
         st.success("索引建立完成！")
 
 elif menu == "💬 助教對話":
     st.header("向 KMUCer 提問")
     query = st.text_input("輸入你的問題：")
     if st.button("送出問題") and query:
-        results = collection.query(query_texts=[query], n_results=3)
-        context_chunks = [doc for doc in results["documents"][0]]
-        context_text = "\n".join(context_chunks)
+        if not knowledge_chunks:
+            st.warning("⚠️ 請先到『建立知識庫』上傳教材！")
+        else:
+            query_emb = get_embedding(query)
+            # 找出最相似的三個 chunk
+            sims = [(cosine_similarity(query_emb, emb), text) for text, emb in knowledge_chunks]
+            sims = sorted(sims, key=lambda x: x[0], reverse=True)[:3]
+            context_text = "\n".join([s[1] for s in sims])
 
-        system_prompt = """你是 KMUCer，高雄醫學大學醫藥暨應用化學系的課程助教。
-        你是碩士班學姊，風格「專業 + 親切 + 搞笑」。
-        請基於以下教材內容回答學生問題：
-        {context}
-        """.format(context=context_text)
+            system_prompt = f"""你是 KMUCer，高雄醫學大學醫藥暨應用化學系的課程助教。
+            你是碩士班學姊，風格「專業 + 親切 + 搞笑」。
+            請基於以下教材內容回答學生問題：
+            {context_text}
+            """
 
-        completion = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": query}
-            ]
-        )
+            completion = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": query}
+                ]
+            )
 
-        answer = completion.choices[0].message.content
-        st.markdown("### 🗨️ KMUCer 回答")
-        st.write(answer)
-        st.markdown("### 📎 參考教材")
-        st.write(results["metadatas"][0])
+            answer = completion.choices[0].message.content
+            st.markdown("### 🗨️ KMUCer 回答")
+            st.write(answer)
+            st.markdown("### 📎 參考教材")
+            st.write(context_text)
