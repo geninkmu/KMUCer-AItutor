@@ -122,7 +122,7 @@ if mode == "teacher":
 
     if menu == "🧱 建立知識庫":
         st.header("建立 / 更新教材知識庫")
-        uploaded_files = st.file_uploader("上傳教材檔案 (PDF 或 PPTX)", type=["pdf", "pptx"], accept_multiple_files=True)
+       uploaded_files = st.file_uploader("上傳教材檔案 (PDF, PPTX, DOCX, TXT, CSV, RTF)", accept_multiple_files=True)
         if st.button("🚀 建立索引") and uploaded_files:
             for file in uploaded_files:
                 if file.name.endswith(".pdf"):
