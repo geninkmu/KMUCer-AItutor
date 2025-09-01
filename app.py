@@ -2,12 +2,16 @@ import os
 import streamlit as st
 import pdfplumber
 from pptx import Presentation
+from docx import Document
+import pandas as pd
+from striprtf.striprtf import rtf_to_text
 from openai import OpenAI, RateLimitError
 import numpy as np
 import sqlite3
 import json
 import time
 
+# 初始化 OpenAI API
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
     st.error("尚未設定 OPENAI_API_KEY。請在本機以環境變數或在部署平台的 Secrets 設定。")
@@ -15,7 +19,7 @@ if not OPENAI_API_KEY:
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-
+# 初始化 SQLite
 DB_PATH = "kmucer.db"
 conn = sqlite3.connect(DB_PATH)
 c = conn.cursor()
@@ -27,7 +31,7 @@ c.execute('''CREATE TABLE IF NOT EXISTS chunks (
             )''')
 conn.commit()
 
-
+# 讀取 PDF
 def read_pdf(file):
     text = ""
     with pdfplumber.open(file) as pdf:
@@ -35,7 +39,7 @@ def read_pdf(file):
             text += page.extract_text() or ""
     return text
 
-
+# 讀取 PPTX
 def read_pptx(file):
     text = ""
     prs = Presentation(file)
@@ -45,6 +49,7 @@ def read_pptx(file):
                 text += shape.text + "\n"
     return text
 
+# 讀取 DOCX
 def read_docx(file):
     text = ""
     doc = Document(file)
@@ -52,9 +57,11 @@ def read_docx(file):
         text += para.text + "\n"
     return text
 
+# 讀取 TXT
 def read_txt(file):
     return file.read().decode("utf-8")
 
+# 讀取 CSV
 def read_csv(file):
     try:
         df = pd.read_csv(file)
@@ -63,10 +70,12 @@ def read_csv(file):
         df = pd.read_csv(file, encoding="big5", errors="ignore")
     return df.to_string()
 
+# 讀取 RTF
 def read_rtf(file):
     raw_text = file.read().decode("utf-8", errors="ignore")
     return rtf_to_text(raw_text)
 
+# 計算 embedding (含限速重試)
 def get_embedding(text):
     for attempt in range(3):  # 最多重試 3 次
         try:
@@ -81,12 +90,14 @@ def get_embedding(text):
     st.error("❌ 這段文字因為 API 限制無法建立 embedding，已跳過。")
     return None
 
+# 儲存到 SQLite
 def save_chunk(source, content, embedding):
     if embedding is not None:
         c.execute("INSERT INTO chunks (source, content, embedding) VALUES (?, ?, ?)", 
                   (source, content, json.dumps(embedding.tolist())))
         conn.commit()
 
+# 從 SQLite 取所有 chunk
 def load_chunks():
     c.execute("SELECT source, content, embedding FROM chunks")
     rows = c.fetchall()
@@ -97,19 +108,21 @@ def load_chunks():
         chunks.append((source, content, emb))
     return chunks
 
-
+# 相似度計算 (cosine similarity)
 def cosine_similarity(a, b):
     return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
 
+# ---------------- App 開始 ----------------
 
+st.title("📚 KMUCer 助教 (老師 / 學生模式)")
 
-st.title("📚 KMUCer 你的AI化學助教")
-
-
+# 輸入角色密碼
 role = st.sidebar.text_input("輸入角色密碼 (留空 = 學生模式)", type="password")
 
-TEACHER_PASSWORD = "985007"
+# 設定老師密碼
+TEACHER_PASSWORD = "KMU2025"
 
+# 模式判斷
 if role == TEACHER_PASSWORD:
     mode = "teacher"
     st.sidebar.success("已進入：老師模式")
@@ -117,18 +130,33 @@ else:
     mode = "student"
     st.sidebar.info("目前是：學生模式")
 
+# ---------------- 老師模式 ----------------
 if mode == "teacher":
     menu = st.sidebar.radio("功能選單", ["💬 助教對話", "🧱 建立知識庫"])
 
     if menu == "🧱 建立知識庫":
         st.header("建立 / 更新教材知識庫")
-       uploaded_files = st.file_uploader("上傳教材檔案 (PDF, PPTX, DOCX, TXT, CSV, RTF)", accept_multiple_files=True)
+        uploaded_files = st.file_uploader(
+            "上傳教材檔案 (PDF, PPTX, DOCX, TXT, CSV, RTF)", 
+            accept_multiple_files=True
+        )
         if st.button("🚀 建立索引") and uploaded_files:
             for file in uploaded_files:
                 if file.name.endswith(".pdf"):
                     text = read_pdf(file)
-                else:
+                elif file.name.endswith(".pptx"):
                     text = read_pptx(file)
+                elif file.name.endswith(".docx"):
+                    text = read_docx(file)
+                elif file.name.endswith(".txt"):
+                    text = read_txt(file)
+                elif file.name.endswith(".csv"):
+                    text = read_csv(file)
+                elif file.name.endswith(".rtf"):
+                    text = read_rtf(file)
+                else:
+                    text = ""
+
                 # 切割文字成 chunk (加大減少 API 請求數)
                 chunks = [text[i:i+1500] for i in range(0, len(text), 1500)]
                 for chunk in chunks:
@@ -136,7 +164,7 @@ if mode == "teacher":
                     save_chunk(file.name, chunk, emb)
             st.success("索引建立完成！")
 
-
+# ---------------- 學生模式 & 對話功能 ----------------
 st.header("向 KMUCer 提問")
 query = st.text_input("輸入你的問題：")
 
