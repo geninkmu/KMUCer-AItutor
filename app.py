@@ -120,7 +120,7 @@ st.title("📚 KMUCer 助教 (老師 / 學生模式)")
 role = st.sidebar.text_input("輸入角色密碼 (留空 = 學生模式)", type="password")
 
 # 設定老師密碼
-TEACHER_PASSWORD = "KMU2025"
+TEACHER_PASSWORD = "985007"
 
 # 模式判斷
 if role == TEACHER_PASSWORD:
