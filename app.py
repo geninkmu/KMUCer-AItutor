@@ -47,11 +47,16 @@ def read_pptx(file):
 
 # 計算 embedding
 def get_embedding(text):
-    response = client.embeddings.create(
-        model="text-embedding-3-small",
-        input=text
-    )
-    return np.array(response.data[0].embedding)
+    while True:
+        try:
+            response = client.embeddings.create(
+                model="text-embedding-3-small",
+                input=text
+            )
+            return np.array(response.data[0].embedding)
+        except RateLimitError:
+            st.warning("⚠️ API 請求太快，被限速了，等一下自動重試...")
+            time.sleep(5)
 
 # 儲存到 SQLite
 def save_chunk(source, content, embedding):
