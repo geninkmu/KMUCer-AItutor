@@ -94,7 +94,7 @@ if menu == "🧱 建立知識庫":
             else:
                 text = read_pptx(file)
             # 切割文字成 chunk
-            chunks = [text[i:i+500] for i in range(0, len(text), 500)]
+            chunks = [text[i:i+1500] for i in range(0, len(text), 1500)]
             for chunk in chunks:
                 emb = get_embedding(chunk)
                 save_chunk(file.name, chunk, emb)
