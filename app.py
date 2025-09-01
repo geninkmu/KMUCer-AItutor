@@ -2,7 +2,8 @@
 import os, io, time, json, pickle
 import streamlit as st
 import numpy as np
-import faiss
+import chromadb
+from chromadb.utils import embedding_functions
 import pdfplumber
 from pptx import Presentation
 from openai import OpenAI
