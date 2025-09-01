@@ -2,10 +2,11 @@ import os
 import streamlit as st
 import pdfplumber
 from pptx import Presentation
-from openai import OpenAI
+from openai import OpenAI, RateLimitError
 import numpy as np
 import sqlite3
 import json
+import time
 
 # 初始化 OpenAI API
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
