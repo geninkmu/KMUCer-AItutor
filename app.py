@@ -82,7 +82,7 @@ def cosine_similarity(a, b):
 
 
 
-st.title("📚 KMUCer 助教 (老師 / 學生模式)")
+st.title("📚 KMUCer 你的AI化學助教")
 
 
 role = st.sidebar.text_input("輸入角色密碼 (留空 = 學生模式)", type="password")
