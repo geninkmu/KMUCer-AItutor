@@ -45,6 +45,27 @@ def read_pptx(file):
                 text += shape.text + "\n"
     return text
 
+def read_docx(file):
+    text = ""
+    doc = Document(file)
+    for para in doc.paragraphs:
+        text += para.text + "\n"
+    return text
+
+def read_txt(file):
+    return file.read().decode("utf-8")
+
+def read_csv(file):
+    try:
+        df = pd.read_csv(file)
+    except UnicodeDecodeError:
+        file.seek(0)
+        df = pd.read_csv(file, encoding="big5", errors="ignore")
+    return df.to_string()
+
+def read_rtf(file):
+    raw_text = file.read().decode("utf-8", errors="ignore")
+    return rtf_to_text(raw_text)
 
 def get_embedding(text):
     for attempt in range(3):  # 最多重試 3 次
